@@ -15,11 +15,7 @@
 # under the License.
 
 require 'rubygems'
-require 'savon'
-
-require 'cloudfiles'
-require 'cloudservers'
-require 'base64'
+require 'profitbricks'
 
 module Deltacloud
   module Drivers
@@ -129,20 +125,17 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
   ### Images
   #
 
-  def images( credentials, opts = nil )
-    pb = new_client( credentials )
-    results = [ ]
-    safely do
-      results = pb.list_images.collect do | img |
-        Image.new(
-          :id => img[ :image_id ].to_s,
-          :name => img[ :image_name ],
-          :description => img[ :image_name ] + ' (' + img[ :os_type ] + ' ' + img[ :image_type ] + ')',
-          :owner_id => credentials.user,
-          :state => 'AVAILABLE',
-          :architecture => 'x86_64'
-        )
-      end
+  def images(credentials, opts = nil)
+    configure_client(credentials)
+    results = ::Profitbricks::Image.all.collect do | img |
+      Image.new(
+        :id => img.id,
+        :name => img.name,
+        :description => "#{img.name} (#{img.os_type}) #{img.type}",
+        :owner_id => credentials.user,
+        :state => 'AVAILABLE',
+        :architecture => 'x86_64'
+      )
     end
     filter_on( results, :id, opts )
   end
@@ -151,12 +144,12 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
   ### Realms
   #
 
-  def realms( credentials, opts = nil )
-    pb = new_client( credentials )
-    result = pb.list_data_centers.collect do | data_center |
+  def realms(credentials, opts = nil)
+    configure_client(credentials)
+    result = ::Profitbricks::DataCenter.all.collect do |data_center|
       Realm.new(
-        :id => data_center[ :data_center_id ],
-        :name => data_center[ :data_center_name ] + ' (' + data_center[ :region ] + ')',
+        :id => data_center.id,
+        :name => "#{data_center.name} (#{data_center.region})",
         :state => 'AVAILABLE', # ProfitBricks doesn't return the states when calling getAllDataCenters()
         :limit => :unlimited
       )
@@ -180,22 +173,23 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
   end
   alias_method :stop_instance, :destroy_instance
 
-  def instances( credentials, opts = { } )
-    pb = new_client( credentials )
+  def instances(credentials, opts = {})
+    configure_client(credentials)
     insts = []
 
-    safely do
-      begin
-        if opts[ :id ]
-          server = pb.get_server( opts[ :id ] )
-          insts << convert_instance( server, credentials.user )
-        else
-          insts = pb.list_servers.collect do |server|
-            convert_instance( server, credentials.user )
-          end
-        end
-      rescue CloudServers::Exception::ItemNotFound
+    begin
+      if opts[:id]
+        server = ::Profitbricks::Server.find(:id => opts[:id])
+        insts << convert_instance(server, credentials.user)
+      else
+        # TODO replace with Server#all once implemented in the API client
+        insts = ::Profitbricks::DataCenter.all.collect do |data_center|
+          (data_center.servers || []).collect do |server|
+            convert_instance(server, credentials.user)
+          end.flatten
+        end.flatten
       end
+    rescue CloudServers::Exception::ItemNotFound
     end
 
     insts = filter_on( insts, :id, opts )
@@ -289,48 +283,50 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
 
   private
 
-  def extract_ips( server )
-    ips = { :public => [ ], :private => [ ] }
-    if not server.has_key?( :nics )
-      return ips
+  def extract_ips(server)
+    ips = {:public => [], :private => []}
+    server.nics.select { |nic| nic.internet_access == true }.each do |public|
+      public.ips.each do |ip|
+        ips[:public] << ip
+      end
     end
-    nics = ( server[ :nics ].kind_of?( Array ) ? server[ :nics ] : [ server[ :nics ] ] )
-    # public ips, nics with internet access
-    for nic in nics.find_all { | nic | nic[ :internet_access ] }
-      nic_ips = (nic[ :ips ].kind_of?( Array ) ? nic[ :ips ] : [ nic[ :ips ] ] )
-      nic_ips = nic_ips.find_all{ | ip | ip != nil }
-      ips[ :public ].push *nic_ips
+    server.nics.select { |nic| nic.internet_access == false }.each do |private|
+      private.ips.each do |ip|
+        ips[:private] << ip
+      end
     end
-    # private ips, nics without internet access
-    for nic in nics.find_all { | nic | not nic[ :internet_access ] }
-      nic_ips = (nic[ :ips ].kind_of?( Array ) ? nic[ :ips ] : [ nic[ :ips ] ] )
-      nic_ips = nic_ips.find_all{ | ip | ip != nil }
-      ips[ :private ].push *nic_ips
-    end
-
     ips
   end
 
   def convert_instance( server, user_name )
-    ips = extract_ips( server )
+    ips = extract_ips(server)
     inst = Instance.new(
-      :id => server[ :server_id ],
-      :realm_id => server[ :data_center_id ],
-      :owner_id => user_name,
-      :description => server[ :server_name ],
-      :name => ( server[ :server_name ] == nil ? 'No name' : server[ :server_name ] ),
-      :state => ( server[ :virtual_machine_state ] == 'RUNNING' ) ? 'RUNNING' : 'PENDING',
-      :architecture => 'x86_64',
-      :image_id => nil,
-      :instance_profile => InstanceProfile::new( 'default' ),
-      :public_addresses => ips[ :public ].collect { | ip | InstanceAddress.new( ip ) },
-      :private_addresses => ips[ :private ].collect { | ip | InstanceAddress.new( ip ) },
-      :username => nil,
-      :password => nil
+      :id                => server.id,
+      :realm_id          => server.data_center_id,
+      :owner_id          => user_name,
+      :description       => server.name,
+      :name              => (server.name == nil ? 'No name' : server.name),
+      :state             => server.running? ? 'RUNNING' : 'PENDING',
+      :architecture      => 'x86_64',
+      :image_id          => nil,
+      :instance_profile  => InstanceProfile::new('default'),
+      :public_addresses  => ips[:public].collect { | ip | InstanceAddress.new( ip ) },
+      :private_addresses => ips[:private].collect { | ip | InstanceAddress.new( ip ) },
+      :username          => nil,
+      :password          => nil
     )
     inst.actions = instance_actions_for( inst.state )
     inst.create_image = 'RUNNING'.eql?( inst.state )
     inst
+  end
+  
+  def configure_client(credentials)
+    safely do
+      ::Profitbricks.configure do |config|
+        config.username = credentials.user
+        config.password = credentials.password
+      end
+    end
   end
 
   def new_client( credentials )
