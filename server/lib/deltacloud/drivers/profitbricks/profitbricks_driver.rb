@@ -73,16 +73,12 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
 
   def instances(credentials, opts = {})
     new_client(credentials)
-    results = []
-    safely do
-      results = ::Profitbricks::DataCenter.all.collect do |data_center|
-        (data_center.servers || []).collect do |server|
-          convert_instance(server, credentials.user)
-        end.flatten
-      end.flatten
+    results = safely do ::Profitbricks::Server.all.collect do |s|
+        convert_instance(s, credentials.user)
+      end
     end
-    results = filter_on( results, :id, opts )
-    results = filter_on( results, :state, opts )
+    results = filter_on(results, :id, opts)
+    results = filter_on(results, :state, opts)
     results
   end
 
@@ -180,23 +176,7 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
 
   private
 
-  def extract_ips(server)
-    ips = {:public => [], :private => []}
-    server.nics.select { |nic| nic.internet_access == true }.each do |public|
-      public.ips.each do |ip|
-        ips[:public] << ip
-      end
-    end
-    server.nics.select { |nic| nic.internet_access == false }.each do |private|
-      private.ips.each do |ip|
-        ips[:private] << ip
-      end
-    end
-    ips
-  end
-
   def convert_instance(server, user_name)
-    ips = extract_ips(server)
     inst = Instance.new(
       :id                => server.id,
       :realm_id          => server.data_center_id,
@@ -207,8 +187,8 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
       :architecture      => 'x86_64',
       :image_id          => nil,
       :instance_profile  => InstanceProfile::new('default'),
-      :public_addresses  => ips[:public].collect { | ip | InstanceAddress.new( ip ) },
-      :private_addresses => ips[:private].collect { | ip | InstanceAddress.new( ip ) },
+      :public_addresses  => server.public_ips,
+      :private_addresses => server.private_ips,
       :username          => nil,
       :password          => nil,
       #:storage_volumes => server.connected_storages
@@ -244,12 +224,7 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
         config.username = credentials.user
         config.password = credentials.password
       end
-      client = ::Profitbricks.client
     end
-    if client == nil
-      raise 'AuthFailure'
-    end
-    client
   end
 
   exceptions do
@@ -266,9 +241,6 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
       status 500
     end
 
-    on /CloudServers::Exception::(\w+)/ do
-      status 500
-    end
 
   end
 
