@@ -16,7 +16,6 @@
 
 require 'rubygems'
 require 'profitbricks'
-require 'pp'
 
 module Deltacloud
   module Drivers
@@ -24,16 +23,18 @@ module Deltacloud
 
 class ProfitbricksDriver < Deltacloud::BaseDriver
 
-  feature :images, :user_name
-  feature :instances, :realm_filter
-  feature :instances, :hardware_profiles
-  feature :instances, :user_name
+  feature :instances,
+    :user_name,
+    :realm_filter
 
-  define_hardware_profile 'default' do
-    cpu             ( 1 .. 48 )
-    memory          ( 256 .. 192*1024 )
-    storage         ( 1 .. 64*1024 )
-    architecture    'x86_64'
+  feature :images,
+    :user_name
+
+  define_hardware_profile('default') do
+    cpu              1..48
+    memory           256..(192*1024), :default => 256
+    storage          1..2048
+    architecture     'x86_64'
   end
 
   def images(credentials, opts = nil)
@@ -48,10 +49,12 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
             :owner_id => credentials.user,
             :state => 'AVAILABLE',
             :architecture => 'x86_64',
-            :actions => []
         )
       end
     end
+    # Add hardware profiles to each image
+    profiles = hardware_profiles(credentials)
+    results.each { |img| img.hardware_profiles = profiles }
     filter_on( results, :id, opts )
   end
 
@@ -77,13 +80,57 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
         convert_instance(s, credentials.user)
       end
     end
-    results = filter_on(results, :id, opts)
-    results = filter_on(results, :state, opts)
+    filter_on(results, opts, :id, :state, :realm_id)
     results
   end
 
-  def create_instance( credentials, image_id, opts )
-    raise 'Error'
+  def create_instance( credentials, image_id, opts)
+    new_client(credentials)
+    storage = nil
+    server = nil
+    params = {}
+
+    #if opts[:hwp_storage]
+      params[:name] = "Storage#{rand(1000)}"
+      params[:size] = opts.delete[:hwp_storage]
+      params[:mount_image_id] = opts.delete[:image_id]
+      params[:data_center_id] = opts[:data_center_id]
+
+      #storage = ::Profitbricks::Storage.create(params)
+      #storage = convert_storage(storage)
+    #end
+
+    puts opts
+
+=begin
+    safely do
+      if opts[:realm_id]
+        opts[:data_center_id] = opts.delete("realm_id")
+      end
+
+      if opts[:hwp_storage]
+        params[:name] = "Storage#{rand(1000)}"
+        params[:size] = opts.delete[:hwp_storage]
+        params[:mount_image_id] = opts.delete[:image_id]
+        params[:data_center_id] = opts[:data_center_id]
+        puts params
+        safely do
+          storage = ::Profitbricks::Storage.create(params)
+          storage = convert_storage(storage)
+        end
+      end
+
+      opts[:name] = "Sever#{rand(1000)}" unless opts[:name].empty?
+      opts[:ram] = opts.delete("hwp_memory")
+      opts[:cpu] = opts.delete("hwp_cpu")
+      opts[:availability_zone] = "AUTO"
+      if storage[:id]
+        opts[:boot_from_storage_id] = storage[:id]
+      end
+      #server = convert_instance(::Profitbricks::Server.create(opts), credentials.user)
+    end
+    server
+=end
   end
 
 
@@ -132,24 +179,44 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
   end
 
 
-  def create_storage_volume(credentials, opts={})
+  def create_storage_volume(credentials, opts = {})
     new_client(credentials)
-    raise 'Error'
+    result = nil
+    params = {}
+    safely do
+      opts[:size] = opts.delete("capacity") || 1
+      opts[:data_center_id] = opts.delete("realm_id") unless (opts["realm_id"].nil? || opts["realm_id"].empty?)
+      opts[:name] = opts.delete("name") || "Storage#{rand(1000)}"
+      opts.delete("commit")
+      opts.delete("snapshot_id")
+      opts.delete("description")
+      puts opts
+      result = ::Profitbricks::Storage.create(opts)
+      result = convert_storage(result)
+    end
+    result
   end
 
-  def destroy_storage_volume(credentials, opts={})
-    new_client(credentials)
-    raise 'Error'
-  end
-
-  def attach_storage_volume( credentials, opts = { } )
+  def destroy_storage_volume(credentials, opts = {})
     new_client( credentials )
+    safely do
+      storage = ::Profitbricks::Storage.find(:id => opts[:id])
+      storage.delete
+    end
+  end
+
+  def attach_storage_volume( credentials, opts = {} )
+    new_client( credentials )
+    puts opts
     raise 'Error'
   end
 
-  def detach_storage_volume(credentials, opts)
+  def detach_storage_volume(credentials, opts = {})
     new_client( credentials )
-    raise 'Error'
+    safely do
+      storage = ::Profitbricks::Storage.find(:id => opts[:id])
+      storage.disconnect(:server_id => opts[:instance_id])
+    end
   end
 
   define_instance_states do
@@ -202,18 +269,15 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
     result = StorageVolume.new(
         :id => storage.id,
         :name => storage.name,
-        :description => "Capacity: #{storage.size}GB, Os: #{storage.os_type}",
+        :description => "Capacity: #{storage.size}GB",
         :created => storage.creation_time,
         :state => storage.provisioning_state,
         :capacity => storage.size,
         :realm_id => storage.data_center_id,
-        :device => 'VIRTIO',
         :instance_id => storage.server_ids,
         :actions => [:attach, :detach, :destroy]
     )
-    if storage.respond_to?(:server_id)
-      result[:instance_id] = storage.server_id
-    end
+
     result
   end
   
@@ -240,7 +304,6 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
     on /Error/ do
       status 500
     end
-
 
   end
 
