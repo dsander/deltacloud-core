@@ -32,9 +32,9 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
     :user_name
 
   define_hardware_profile('default') do
-    cpu              1..48,           :default => 1
-    memory           256..(192*1024), :default => 1024
-    storage          20..2048,        :default => 50
+    cpu              1..48,                            :default => 1
+    memory           (1..196*4).collect { |i| i*256 }, :default => 1024
+    storage          20..2048,                         :default => 50
     architecture     'x86_64'
   end
 
@@ -64,7 +64,12 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
     new_client(credentials)
     results = []
     safely do
-      results = ::Profitbricks::DataCenter.all.collect do |data_center|
+      datacenters = if opts[:image]
+        ::Profitbricks::DataCenter.all.select { |img| opts[:image].description =~ /Region: #{img.region},/ }
+      else
+        ::Profitbricks::DataCenter.all
+      end
+      results = datacenters.collect do |data_center|
         Realm.new(
           :id => data_center.id,
           :name => "#{data_center.name} (#{data_center.region})",
@@ -254,6 +259,8 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
       :architecture      => 'x86_64',
       :image_id          => nil,
       :instance_profile  => InstanceProfile::new('default'),
+      :public_addresses  => server.public_ips,
+      :private_addresses => server.private_ips,
       :username          => nil,
       :password          => nil,
       #:storage_volumes => server.connected_storages
