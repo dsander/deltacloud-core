@@ -16,7 +16,6 @@
 
 require 'rubygems'
 require 'profitbricks'
-require 'pp'
 
 module Deltacloud
   module Drivers
@@ -83,18 +82,10 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
 
   def instances(credentials, opts = {})
     new_client(credentials)
-#this code is commented until proffitbrick gem will be updated
-=begin
     results = safely do ::Profitbricks::Server.all.collect do |s|
         convert_instance(s, credentials.user)
       end
     end
-=end
-    results = ::Profitbricks::DataCenter.all.collect do |data_center|
-      (data_center.servers || []).collect do |server|
-        convert_instance(server, credentials.user)
-      end.flatten
-    end.flatten
     filter_on(results, opts, :id, :state, :realm_id)
     results
   end
@@ -133,9 +124,7 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
       if opts[:data_center_id] == nil && storage.respond_to?('realm_id')
           opts[:data_center_id] = storage.realm_id
       end
-      pp opts
       server = convert_instance(::Profitbricks::Server.create(opts), credentials.user)
-      pp server
     end
     server
   end
@@ -197,8 +186,7 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
       opts.delete("commit")
       opts.delete("snapshot_id")
       opts.delete("description")
-      result = ::Profitbricks::Storage.create(opts)
-      result = convert_storage(result)
+      result = convert_storage(::Profitbricks::Storage.create(opts))
     end
     result
   end
@@ -265,14 +253,6 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
       :password          => nil,
       #:storage_volumes => server.connected_storages
     )
-    if server.respond_to?("public_ips")
-      inst.public_addresses = server.public_ips
-    end
-
-    if server.respond_to?("private_ips")
-      inst.private_addresses = server.private_ips
-    end
-
     inst.actions = instance_actions_for( inst.state )
     #inst.create_image = 'RUNNING'.eql?( inst.state )
     inst
