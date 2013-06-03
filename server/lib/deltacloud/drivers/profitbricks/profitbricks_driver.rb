@@ -16,6 +16,7 @@
 
 require 'rubygems'
 require 'profitbricks'
+require 'pp'
 
 module Deltacloud
   module Drivers
@@ -142,7 +143,7 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
     new_client(credentials)
     safely do
       server = ::Profitbricks::Server.find(:id => instance_id)
-      server.shutdown
+      server.power_off
     end
   end
 
@@ -216,14 +217,13 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
     start.to( :pending )          .automatically
     pending.to( :running )        .automatically
 
-    pending.to( :stopping )       .on( :stop )
-    pending.to( :stopped )        .on( :start )
+    #pending.to( :stopped )        .on( :start )
 
     stopped.to( :running )        .on( :start )
+    stopped.to( :stopped )        .on( :destroy )
 
     running.to( :running )        .on( :reboot )
     running.to( :stopping )       .on( :stop )
-    running.to( :finish)          .on( :destroy)
 
     stopping.to(:stopped)         .automatically
     stopping.to(:finish)          .automatically
@@ -243,7 +243,7 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
       :owner_id          => user_name,
       :description       => server.name,
       :name              => server.name,
-      :state             => server.running?? 'RUNNING' : 'PENDING',
+      :state             => convert_instance_state(server),
       :architecture      => 'x86_64',
       :image_id          => nil,
       :instance_profile  => InstanceProfile::new('default'),
@@ -251,14 +251,55 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
       :private_addresses => server.private_ips,
       :username          => nil,
       :password          => nil,
-      #:storage_volumes => server.connected_storages
+      :storage_volumes => convert_instance_storages_volumes(server)
     )
     inst.actions = instance_actions_for( inst.state )
     #inst.create_image = 'RUNNING'.eql?( inst.state )
     inst
   end
 
+  def convert_instance_state(server)
+    state = server.respond_to?('virtual_machine_state')? (server.provisioned?? server.virtual_machine_state : server.provisioning_state) : "ERROR"
+    case state
+      when /INPROCESS/
+        "PENDING"
+      when /SHUTOFF/
+        "STOPPED"
+      when /SHUTDOWN/
+        "STOPPED"
+      when /PAUSED/
+        "STOPPED"
+      when /INACTIVE/
+        "STOPPED"
+      when /CRASHED/
+        "ERROR"
+      when /NOSTATE/
+        "ERROR"
+      when /ERROR/
+        "ERROR"
+      when /RUNNING/
+        "RUNNING"
+      else
+        "UNKNOWN"
+    end
+  end
+
+  def convert_instance_storages_volumes(server)
+    return [] if server.connected_storages.nil?
+    results = server.connected_storages.kind_of?(Array) ? server.connected_storages : [server.connected_storages]
+    results.inject([]){|res, cur| res << {cur[:storage_id] => nil} ;res}
+  end
+
+  def convert_instance_image(server)
+    return nil if server.connected_storages.nil?
+    results = server.connected_storages.kind_of?(Array) ? server.connected_storages : [server.connected_storages]
+    results = results.select{| storage | ::Profitbricks::Storage.find({:id => storage[:storage_id]}).respond_to?("mount_image")}
+    #return nil if ::Profitbricks::Storage.find({:id => results[0][:storage_id]}).mount_image[:image_id]
+  end
+
+
   def convert_storage (storage)
+    pp storage
     result = StorageVolume.new(
         :id => storage.id,
         :name => storage.name,
@@ -276,7 +317,7 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
     end
     result
   end
-  
+
   def new_client(credentials)
     client = nil
     safely do
