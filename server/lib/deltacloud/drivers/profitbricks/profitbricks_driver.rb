@@ -245,7 +245,7 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
       :name              => server.name,
       :state             => convert_instance_state(server),
       :architecture      => 'x86_64',
-      :image_id          => nil,
+      :image_id          => convert_instance_image(server),
       :instance_profile  => InstanceProfile::new('default'),
       :public_addresses  => server.public_ips,
       :private_addresses => server.private_ips,
@@ -286,15 +286,17 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
 
   def convert_instance_storages_volumes(server)
     return [] if server.connected_storages.nil?
-    results = server.connected_storages.kind_of?(Array) ? server.connected_storages : [server.connected_storages]
-    results.inject([]){|res, cur| res << {cur[:storage_id] => nil} ;res}
+    server.connected_storages.collect { |s| {s.id => nil} }
   end
 
   def convert_instance_image(server)
     return nil if server.connected_storages.nil?
-    results = server.connected_storages.kind_of?(Array) ? server.connected_storages : [server.connected_storages]
-    results = results.select{| storage | ::Profitbricks::Storage.find({:id => storage[:storage_id]}).respond_to?("mount_image")}
-    #return nil if ::Profitbricks::Storage.find({:id => results[0][:storage_id]}).mount_image[:image_id]
+    server.connected_storages.each do |s|
+      # FIXME due to the api not returning the bootDevice flag we just use the first image we find
+      storage = ::Profitbricks::Storage.find(id: s.id)
+      return storage.mount_image.id if storage.mount_image
+    end
+    return nil
   end
 
 
