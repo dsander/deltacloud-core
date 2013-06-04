@@ -38,7 +38,7 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
     architecture     'x86_64'
   end
 
-  def images(credentials, opts = nil)
+  def images(credentials, opts = {})
     new_client(credentials)
     results = []
     safely do
@@ -60,11 +60,11 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
     filter_on( results, opts, :id, :region, :name)
   end
 
-  def realms(credentials, opts = nil)
+  def realms(credentials, opts = {})
     new_client(credentials)
     results = []
     safely do
-      datacenters = if opts[:image]
+      datacenters = if opts[:image]!=nil
         ::Profitbricks::DataCenter.all.select { |img| opts[:image].description =~ /Region: #{img.region},/ }
       else
         ::Profitbricks::DataCenter.all
@@ -164,7 +164,7 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
   end
 
 
-  def storage_volumes( credentials, opts = { } )
+  def storage_volumes( credentials, opts = {} )
     new_client(credentials)
     results = ::Profitbricks::DataCenter.all.collect do |data_center|
       (data_center.storages || []).collect do |storage|
@@ -202,7 +202,15 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
 
   def attach_storage_volume( credentials, opts = {} )
     new_client( credentials )
-    raise 'Error'
+    safely do
+      storage = ::Profitbricks::Storage.find({:id => opts[:id]})
+      storage.connect(
+        {
+          :server_id => opts[:instance_id],
+          :bus_type => 'VIRTIO'
+        }
+      )
+    end
   end
 
   def detach_storage_volume(credentials, opts = {})
@@ -301,7 +309,6 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
 
 
   def convert_storage (storage)
-    pp storage
     result = StorageVolume.new(
         :id => storage.id,
         :name => storage.name,
