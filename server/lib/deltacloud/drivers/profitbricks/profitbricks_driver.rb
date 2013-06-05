@@ -203,13 +203,9 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
   def attach_storage_volume( credentials, opts = {} )
     new_client( credentials )
     safely do
-      storage = ::Profitbricks::Storage.find({:id => opts[:id]})
-      storage.connect(
-        {
-          :server_id => opts[:instance_id],
-          :bus_type => 'VIRTIO'
-        }
-      )
+      #storage = ::Profitbricks::Storage.find(:id => opts[:id])
+      #storage.connect(:server_id => opts[:instance_id])
+      ::Profitbricks.request :connect_storage_to_server, { arg0: {:storage_id => opts[:id], :server_id => opts[:instance_id]}}
     end
   end
 
@@ -292,6 +288,7 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
     end
   end
 
+
   def convert_instance_storages_volumes(server)
     return [] if server.connected_storages.nil?
     server.connected_storages.collect { |s| {s.id => nil} }
@@ -309,11 +306,12 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
 
 
   def convert_storage (storage)
+    pp storage
     result = StorageVolume.new(
         :id => storage.id,
         :name => storage.name,
         :description => "Capacity: #{storage.size}GB",
-        :state => storage.provisioning_state,
+        :state => convert_storage_state(storage),
         :capacity => storage.size,
         :realm_id => storage.data_center_id,
         :actions => [:attach, :detach, :destroy]
@@ -325,6 +323,22 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
       result.created = storage.creation_time
     end
     result
+  end
+
+  def convert_storage_state(storage)
+    state = storage.respond_to?('provisioning_state')? storage.provisioning_state : "ERROR"
+    case state
+      when /INPROCESS/
+        "PENDING"
+      when /INACTIVE/
+        "ERROR"
+      when /ERROR/
+        "ERROR"
+      when /AVAILABLE/
+        "AVAILABLE"
+      else
+        "UNKNOWN"
+    end
   end
 
   def new_client(credentials)
