@@ -280,17 +280,65 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
     end
   end
 
-  def network_interfaces(credentials, opts = {})
-      new_client(credentials)
-      nics = []
-      safely do
-        results =::Profitbricks::Server.all.select { | server| server.nics!=nil}.each do |server|
-          server.nics.each do |nic|
-            nics.push(convert_network_interface(nic))
-          end
-        end
+  def firewalls(credentials, opts={})
+    new_client(credentials)
+    safely do
+      ::Profitbricks::Server.all.collect do |server|
+        (server.nics || []).collect do |nic|
+          convert_firewall(nic.firewall) if nic.firewall
+        end.flatten.compact
+      end.flatten
     end
-    nics
+  end
+  
+  def create_firewall(credentials, opts={})
+    # TODO is this even possible?
+  end
+  
+  def delete_firewall(credentials, opts={})
+    new_client(credentials)
+    
+    safely do
+      firewall = ::Profitbricks::Firewall.find(:id => opts[:id])
+      firewall.delete
+    end
+  end
+
+  def create_firewall_rule(credentials, opts={})
+    new_client(credentials)
+    #safely do
+      firewall = ::Profitbricks::Firewall.find(:id => opts[:id])
+      rules = opts[:addresses].collect do |source_ip|
+        ::Profitbricks::FirewallRule.new({
+          :protocol => opts[:protocol],
+          :port_range_start => opts[:port_from],
+          :port_range_end => opts[:port_to],
+          :source_ip => source_ip.split('/').first,
+          :target_ip => '0.0.0.0'
+        })
+      end
+      firewall.add_rules(rules)
+    #end
+  end
+
+  def delete_firewall_rule(credentials, opts={})
+    new_client(credentials)
+    safely do
+      ::Profitbricks::Firewall.find(:id => opts[:firewall]).rules.select { |rule|
+        rule.id == opts[:rule_id]
+      }.first.delete
+    end
+  end
+
+  def network_interfaces(credentials, opts = {})
+    new_client(credentials)
+    safely do
+      ::Profitbricks::Server.all.select { | server| server.nics!=nil}.collect do |server|
+        server.nics.collect do |nic|
+          convert_network_interface(nic)
+        end.flatten
+      end.flatten
+    end
   end
 
   define_instance_states do
@@ -447,6 +495,28 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
       :state => "UP",
       :instance => nic.server_id,
       :ip_address => nic.ips.first
+    })
+  end
+
+  def convert_firewall(firewall)
+    Firewall.new({
+      :id => firewall.id,
+      :description => "Firewall of #{firewall.nic_id}",
+      :owner_id => firewall.nic_id,
+      :rules => firewall.rules ? firewall.rules.collect { |r| convert_firewall_rule(r)} : []
+    })
+  end
+
+  def convert_firewall_rule(rule)
+    FirewallRule.new({
+      :id => rule.id,
+      :allow_protocol => rule.protocol,
+      :port_from => rule.port_range_start,
+      :port_to => rule.port_range_end,
+      :sources => [{:type => "address", :family=>"ipv4",
+                    :address=>rule.source_ip,
+                    :prefix=>''}],
+      :direction => 'ingress',
     })
   end
 
