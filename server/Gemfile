@@ -14,7 +14,7 @@ group :development do
   gem "webmock", '< 1.10'  # VCR wants that version
   gem "vcr"
   gem "aws"
-  gem "profitbricks", :github => "dsander/profitbricks", :ref => '16aaad6'
+  gem "profitbricks", :github => "dsander/profitbricks", :ref => 'ff94a5f'
 end
 
 group :jenkins do

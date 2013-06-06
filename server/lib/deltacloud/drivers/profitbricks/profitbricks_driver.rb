@@ -83,8 +83,17 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
 
   def instances(credentials, opts = {})
     new_client(credentials)
-    results = safely do ::Profitbricks::Server.all.collect do |s|
-        convert_instance(s, credentials.user)
+
+    results = safely do
+      if opts[:storage_id]
+        storage = ::Profitbricks::Storage.find(:id => opts[:storage_id])
+        ::Profitbricks::DataCenter.find(:id => storage.data_center_id).servers.collect do |s|
+          convert_instance(s, credentials.user)
+        end
+      else
+        ::Profitbricks::Server.all.collect do |s|
+          convert_instance(s, credentials.user)
+        end
       end
     end
     filter_on(results, opts, :id, :state, :realm_id)
@@ -166,12 +175,15 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
 
   def storage_volumes( credentials, opts = {} )
     new_client(credentials)
-    results = ::Profitbricks::DataCenter.all.collect do |data_center|
-      (data_center.storages || []).collect do |storage|
-        convert_storage(storage)
+    results = if opts[:id]
+      [convert_storage(::Profitbricks::Storage.find(:id => opts[:id]))]
+    else
+      ::Profitbricks::DataCenter.all.collect do |data_center|
+        (data_center.storages || []).collect do |storage|
+          convert_storage(storage)
+        end.flatten
       end.flatten
-    end.flatten
-    results = filter_on(results, opts, :id)
+    end
     results
   end
 
@@ -203,9 +215,8 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
   def attach_storage_volume( credentials, opts = {} )
     new_client( credentials )
     safely do
-      #storage = ::Profitbricks::Storage.find(:id => opts[:id])
-      #storage.connect(:server_id => opts[:instance_id])
-      ::Profitbricks.request :connect_storage_to_server, { arg0: {:storage_id => opts[:id], :server_id => opts[:instance_id]}}
+      storage = ::Profitbricks::Storage.find(:id => opts[:id])
+      storage.connect(:server_id => opts[:instance_id])
     end
   end
 
