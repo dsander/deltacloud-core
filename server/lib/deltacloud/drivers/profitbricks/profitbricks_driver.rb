@@ -427,6 +427,16 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
     balancer
   end
 
+  def convert_network_interface(nic)
+    NetworkInterface.new({
+      :id => nic.id,
+      :name => nic.name,
+      :state => "UP",
+      :instance => nic.server_id,
+      :ip_address => nic.ips.first
+    })
+  end
+
   def new_client(credentials)
     client = nil
     safely do
