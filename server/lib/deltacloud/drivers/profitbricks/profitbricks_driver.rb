@@ -70,12 +70,7 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
         ::Profitbricks::DataCenter.all
       end
       results = datacenters.collect do |data_center|
-        Realm.new(
-          :id => data_center.id,
-          :name => "#{data_center.name} (#{data_center.region})",
-          :state => 'AVAILABLE', # ProfitBricks doesn't return the states when calling getAllDataCenters()
-          :limit => :unlimited
-        )
+        convert_data_center(data_center)
       end
     end
     filter_on(results, :id, opts)
@@ -228,6 +223,63 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
     end
   end
 
+  def create_load_balancer(credentials, opts={})
+    new_client(credentials)
+    safely do
+      load_balancer = ::Profitbricks::LoadBalancer.create(:name => opts[:name], :data_center_id => opts[:realm_id])
+      load_balancer(credentials, :id => load_balancer.id)
+    end
+  end
+
+  def load_balancer(credentials, opts = {})
+    new_client(credentials)
+    #safely do
+      load_balancer = ::Profitbricks::LoadBalancer.find(:id => opts[:id])
+      pp load_balancer
+      data_center = ::Profitbricks::DataCenter.find(:id => load_balancer.data_center_id)
+      convert_load_balancer(load_balancer, data_center)
+    #end
+  end
+
+  def load_balancers(credentials, opts = {})
+    new_client(credentials)
+    #safely do
+      ::Profitbricks::DataCenter.all.collect do |data_center|
+        (data_center.load_balancers || []).collect do |lb|
+          convert_load_balancer(lb, data_center)
+        end.flatten
+      end.flatten
+    #end
+  end
+
+  def lb_register_instance(credentials, opts={})
+    new_client(credentials)
+    safely do
+      load_balancer = ::Profitbricks::LoadBalancer.find(:id => opts[:id])
+      server        = ::Profitbricks::Server.find(:id => opts[:instance_id])
+      load_balancer.register_servers([server])
+      load_balancer(credentials, :id => opts[:id])
+    end
+  end
+
+  def lb_unregister_instance(credentials, opts={})
+    new_client(credentials)
+    safely do
+      load_balancer = ::Profitbricks::LoadBalancer.find(:id => opts[:id])
+      server        = ::Profitbricks::Server.find(:id => opts[:instance_id])
+      load_balancer.deregister_servers([server])
+      load_balancer(credentials, :id => opts[:id])
+    end
+  end
+
+  def destroy_load_balancer(credentials, id)
+    new_client(credentials)
+    safely do
+      load_balancer = ::Profitbricks::LoadBalancer.find(:id => id)
+      load_balancer.delete
+    end
+  end
+
   define_instance_states do
     start.to( :pending )          .automatically
     pending.to( :running )        .automatically
@@ -350,6 +402,29 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
       else
         "UNKNOWN"
     end
+  end
+
+  def convert_data_center(data_center)
+    Realm.new(
+      :id => data_center.id,
+      :name => "#{data_center.name} (#{data_center.region})",
+      :state => 'AVAILABLE', # ProfitBricks doesn't return the states when calling getAllDataCenters()
+      :limit => :unlimited
+    )
+  end
+
+  def convert_load_balancer(lb, dc)
+    realms = []
+    balancer = LoadBalancer.new({
+      :id => lb.id,
+      :name => lb.name,
+      :created_at => lb.creation_time,
+      :public_addresses => [lb.ip],
+      :realms => [convert_data_center(dc)],
+      :instances => lb.balanced_servers ? lb.balanced_servers.collect { |s| convert_instance(s, "") } : [],
+      :listeners => []
+    })
+    balancer
   end
 
   def new_client(credentials)
