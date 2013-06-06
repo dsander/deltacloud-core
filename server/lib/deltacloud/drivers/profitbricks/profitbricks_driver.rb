@@ -280,6 +280,19 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
     end
   end
 
+  def network_interfaces(credentials, opts = {})
+      new_client(credentials)
+      nics = []
+      safely do
+        results =::Profitbricks::Server.all.select { | server| server.nics!=nil}.each do |server|
+          server.nics.each do |nic|
+            nics.push(convert_network_interface(nic))
+          end
+        end
+    end
+    nics
+  end
+
   define_instance_states do
     start.to( :pending )          .automatically
     pending.to( :running )        .automatically
