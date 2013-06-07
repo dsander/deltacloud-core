@@ -384,6 +384,17 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
     end
   end
 
+  def networks(credentials, opts = {})
+    new_client(credentials)
+    safely do
+      ::Profitbricks::Server.all.select { | server| server.nics!=nil}.collect do |server|
+        server.nics.collect do |nic|
+          Network.new({:id => nic.lan_id, :name => nic.lan_id })
+        end.flatten
+      end.flatten
+    end
+  end
+
   define_instance_states do
     start.to( :pending )          .automatically
     pending.to( :running )        .automatically
@@ -537,6 +548,7 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
       :name => nic.name,
       :state => "UP",
       :instance => nic.server_id,
+      :network => nic.lan_id,
       :ip_address => nic.ips.first
     })
   end
