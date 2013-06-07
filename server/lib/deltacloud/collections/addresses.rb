@@ -22,7 +22,7 @@ module Deltacloud::Collections
       @address = driver.address(credentials, params )
       @instances = driver.instances(credentials)
       respond_to do |format|
-        format.html {haml :"addresses/associate"}
+        format.html {haml :"addresses/associate", :locals => {:address => @address, :instances => @instances}}
       end
     end
 
@@ -73,7 +73,7 @@ module Deltacloud::Collections
         end
       end
 
-      action :disassociate, :with_capability => :associate_address do
+      action :disassociate, :with_capability => :disassociate_address do
         description "Disassociate an IP address from an instance"
         param :id, :string, :required
         control do

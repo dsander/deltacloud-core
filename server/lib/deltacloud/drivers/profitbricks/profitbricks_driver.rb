@@ -330,6 +330,49 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
     end
   end
 
+  def address(credentials, opts={})
+    new_client(credentials)
+    servers = ::Profitbricks::Server.all()
+    convert_ip_block(find_ip_block_by_ip(opts[:id]), servers)
+  end
+
+  def addresses(credentials, opts={})
+    new_client(credentials)
+    servers = ::Profitbricks::Server.all()
+    ::Profitbricks::IpBlock.all().collect do |ip_block|
+      convert_ip_block(ip_block, servers)
+    end
+  end
+
+  def create_address(credentials, opts={})
+    new_client(credentials)
+    convert_ip_block(::Profitbricks::IpBlock.reserve(1))
+  end
+
+  def destroy_address(credentials, opts={})
+    new_client(credentials)
+    ip_block = find_ip_block_by_ip(opts[:id])
+    ip_block.release
+  end
+
+  def associate_address(credentials, opts={})
+    new_client(credentials)
+    ip_block = find_ip_block_by_ip(opts[:id])
+    server = ::Profitbricks::Server.find(:id => opts[:instance_id])
+    server.nics.first.add_ip(opts[:id])
+    convert_ip_block(ip_block)
+  end
+
+  def disassociate_address(credentials, opts={})
+    new_client(credentials)
+    ip_block = find_ip_block_by_ip(opts[:id])
+    servers = ::Profitbricks::Server.all()
+    result = convert_ip_block(ip_block, servers)
+    server = ::Profitbricks::Server.find(:id => result.instance_id)
+    server.nics.first.remove_ip(opts[:id])
+    result
+  end
+
   def network_interfaces(credentials, opts = {})
     new_client(credentials)
     safely do
@@ -518,6 +561,22 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
                     :prefix=>''}],
       :direction => 'ingress',
     })
+  end
+
+  def convert_ip_block(ip_block, servers = [])
+    server = servers.select do |server|
+      server.public_ips.include? ip_block.ips.first
+    end.first
+    Address.new({
+      :id => ip_block.ips.first,
+      :instance_id => server ? server.id : nil
+    })
+  end
+
+  def find_ip_block_by_ip(ip)
+    ::Profitbricks::IpBlock.all().each do |ip_block|
+      return ip_block if ip_block.ips.include? ip
+    end
   end
 
   def new_client(credentials)
