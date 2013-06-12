@@ -290,11 +290,12 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
       end.flatten
     end
   end
-  
+
   def create_firewall(credentials, opts={})
     # TODO is this even possible?
+    raise "Error"
   end
-  
+
   def delete_firewall(credentials, opts={})
     new_client(credentials)
     
@@ -384,12 +385,33 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
     end
   end
 
+  def create_network_interface(credentials, opts={})
+    new_client(credentials)
+    safely do
+      opts[:server_id] = opts.delete("instance");
+      opts[:lan_id] = opts[:network].nil?? "1" : opts.delete("network");
+      opts[:name] = opts[:name].nil?? "eth#{rand(100)}" : opts.delete("name");
+      convert_network_interface(::Profitbricks::Nic.create(opts))
+    end
+  end
+
+  def destroy_network_interface(credentials, nic_id)
+    new_client(credentials)
+    safely do
+      nic = ::Profitbricks::Nic.find({:id => nic_id})
+      nic.delete
+    end
+  end
+
   def networks(credentials, opts = {})
     new_client(credentials)
     safely do
       ::Profitbricks::Server.all.select { | server| server.nics!=nil}.collect do |server|
         server.nics.collect do |nic|
-          Network.new({:id => nic.lan_id, :name => nic.lan_id })
+          Network.new({
+            :id => nic.lan_id,
+            :name => "Lan #{nic.lan_id} (Datacenter #{server.data_center_id})"
+          })
         end.flatten
       end.flatten
     end
@@ -484,7 +506,6 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
 
 
   def convert_storage (storage)
-    pp storage
     result = StorageVolume.new(
         :id => storage.id,
         :name => storage.name,
@@ -543,7 +564,7 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
   end
 
   def convert_network_interface(nic)
-    NetworkInterface.new({
+    net = NetworkInterface.new({
       :id => nic.id,
       :name => nic.name,
       :state => "UP",
@@ -551,7 +572,14 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
       :network => nic.lan_id,
       :ip_address => nic.ips.first
     })
+=begin
+    if nic.respond_to?("ips")
+      net.ip_address = nic.ips.first
+    end
+=end
+    pp net
   end
+
 
   def convert_firewall(firewall)
     Firewall.new({
