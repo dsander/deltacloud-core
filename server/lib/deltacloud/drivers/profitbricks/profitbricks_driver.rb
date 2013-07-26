@@ -276,18 +276,22 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
 
   def firewalls(credentials, opts={})
     new_client(credentials)
-    #safely do
+    safely do
       ::Profitbricks::Server.all.collect do |server|
         (server.nics || []).collect do |nic|
-          convert_firewall(nic.firewall) if nic.respond_to?(:firewall)
+          convert_firewall(nic.firewall) if nic.firewall
         end.flatten.compact
       end.flatten
-    #end
+    end
+  end
+
+  def create_firewall(credentials, opts={})
+    # TODO is this even possible?
+    raise "Error"
   end
 
   def delete_firewall(credentials, opts={})
     new_client(credentials)
-
     safely do
       firewall = ::Profitbricks::Firewall.find(:id => opts[:id])
       firewall.delete
