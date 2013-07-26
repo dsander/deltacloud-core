@@ -24,13 +24,6 @@ module Deltacloud
 
 class ProfitbricksDriver < Deltacloud::BaseDriver
 
-  feature :instances,
-    :user_name,
-    :realm_filter
-
-  feature :images,
-    :user_name
-
   define_hardware_profile('default') do
     cpu              1..48,                            :default => 1
     memory           (1..196*4).collect { |i| i*256 }, :default => 1024
@@ -127,7 +120,7 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
       end
       opts[:data_center_id] = opts.delete("realm_id")
       if opts[:data_center_id] == nil && storage.respond_to?('realm_id')
-          opts[:data_center_id] = storage.realm_id
+        opts[:data_center_id] = storage.realm_id
       end
       server = convert_instance(::Profitbricks::Server.create(opts), credentials.user)
     end
@@ -139,7 +132,7 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
     new_client(credentials)
     safely do
       server = ::Profitbricks::Server.find(:id => instance_id)
-      server.reboot
+      server.reset
     end
   end
 
@@ -147,7 +140,7 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
     new_client(credentials)
     safely do
       server = ::Profitbricks::Server.find(:id => instance_id)
-      server.power_off
+      server.stop
     end
   end
 
@@ -170,14 +163,16 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
 
   def storage_volumes( credentials, opts = {} )
     new_client(credentials)
-    results = if opts[:id]
-      [convert_storage(::Profitbricks::Storage.find(:id => opts[:id]))]
-    else
-      ::Profitbricks::DataCenter.all.collect do |data_center|
-        (data_center.storages || []).collect do |storage|
-          convert_storage(storage)
+    results = safely do
+      if opts[:id]
+        [convert_storage(::Profitbricks::Storage.find(:id => opts[:id]))]
+      else
+        ::Profitbricks::DataCenter.all.collect do |data_center|
+          (data_center.storages || []).collect do |storage|
+            convert_storage(storage)
+          end.flatten
         end.flatten
-      end.flatten
+      end
     end
     results
   end
@@ -233,23 +228,22 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
 
   def load_balancer(credentials, opts = {})
     new_client(credentials)
-    #safely do
+    safely do
       load_balancer = ::Profitbricks::LoadBalancer.find(:id => opts[:id])
-      pp load_balancer
       data_center = ::Profitbricks::DataCenter.find(:id => load_balancer.data_center_id)
       convert_load_balancer(load_balancer, data_center)
-    #end
+    end
   end
 
   def load_balancers(credentials, opts = {})
     new_client(credentials)
-    #safely do
+    safely do
       ::Profitbricks::DataCenter.all.collect do |data_center|
         (data_center.load_balancers || []).collect do |lb|
           convert_load_balancer(lb, data_center)
         end.flatten
       end.flatten
-    #end
+    end
   end
 
   def lb_register_instance(credentials, opts={})
@@ -282,23 +276,18 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
 
   def firewalls(credentials, opts={})
     new_client(credentials)
-    safely do
+    #safely do
       ::Profitbricks::Server.all.collect do |server|
         (server.nics || []).collect do |nic|
-          convert_firewall(nic.firewall) if nic.firewall
+          convert_firewall(nic.firewall) if nic.respond_to?(:firewall)
         end.flatten.compact
       end.flatten
-    end
-  end
-
-  def create_firewall(credentials, opts={})
-    # TODO is this even possible?
-    raise "Error"
+    #end
   end
 
   def delete_firewall(credentials, opts={})
     new_client(credentials)
-    
+
     safely do
       firewall = ::Profitbricks::Firewall.find(:id => opts[:id])
       firewall.delete
@@ -307,7 +296,7 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
 
   def create_firewall_rule(credentials, opts={})
     new_client(credentials)
-    #safely do
+    safely do
       firewall = ::Profitbricks::Firewall.find(:id => opts[:id])
       rules = opts[:addresses].collect do |source_ip|
         ::Profitbricks::FirewallRule.new({
@@ -319,7 +308,7 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
         })
       end
       firewall.add_rules(rules)
-    #end
+    end
   end
 
   def delete_firewall_rule(credentials, opts={})
@@ -333,45 +322,57 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
 
   def address(credentials, opts={})
     new_client(credentials)
-    servers = ::Profitbricks::Server.all()
+    servers = safely do
+      ::Profitbricks::Server.all()
+    end
     convert_ip_block(find_ip_block_by_ip(opts[:id]), servers)
   end
 
   def addresses(credentials, opts={})
     new_client(credentials)
-    servers = ::Profitbricks::Server.all()
-    ::Profitbricks::IpBlock.all().collect do |ip_block|
-      convert_ip_block(ip_block, servers)
+    safely do
+      servers = ::Profitbricks::Server.all()
+      ::Profitbricks::IpBlock.all().collect do |ip_block|
+        convert_ip_block(ip_block, servers)
+      end
     end
   end
 
   def create_address(credentials, opts={})
     new_client(credentials)
-    convert_ip_block(::Profitbricks::IpBlock.reserve(1))
+    safely do
+      convert_ip_block(::Profitbricks::IpBlock.reserve(1))
+    end
   end
 
   def destroy_address(credentials, opts={})
     new_client(credentials)
-    ip_block = find_ip_block_by_ip(opts[:id])
-    ip_block.release
+    safely do
+      ip_block = find_ip_block_by_ip(opts[:id])
+      ip_block.release
+    end
   end
 
   def associate_address(credentials, opts={})
     new_client(credentials)
-    ip_block = find_ip_block_by_ip(opts[:id])
-    server = ::Profitbricks::Server.find(:id => opts[:instance_id])
-    server.nics.first.add_ip(opts[:id])
-    convert_ip_block(ip_block)
+    safely do
+      ip_block = find_ip_block_by_ip(opts[:id])
+      server = ::Profitbricks::Server.find(:id => opts[:instance_id])
+      server.nics.first.add_ip(opts[:id])
+      convert_ip_block(ip_block)
+    end
   end
 
   def disassociate_address(credentials, opts={})
     new_client(credentials)
-    ip_block = find_ip_block_by_ip(opts[:id])
-    servers = ::Profitbricks::Server.all()
-    result = convert_ip_block(ip_block, servers)
-    server = ::Profitbricks::Server.find(:id => result.instance_id)
-    server.nics.first.remove_ip(opts[:id])
-    result
+    safely do
+      ip_block = find_ip_block_by_ip(opts[:id])
+      servers = ::Profitbricks::Server.all()
+      result = convert_ip_block(ip_block, servers)
+      server = ::Profitbricks::Server.find(:id => result.instance_id)
+      server.nics.first.remove_ip(opts[:id])
+      result
+    end
   end
 
   def network_interfaces(credentials, opts = {})
@@ -421,8 +422,6 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
     start.to( :pending )          .automatically
     pending.to( :running )        .automatically
 
-    #pending.to( :stopped )        .on( :start )
-
     stopped.to( :running )        .on( :start )
     stopped.to( :stopped )        .on( :destroy )
 
@@ -449,7 +448,7 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
       :name              => server.name,
       :state             => convert_instance_state(server),
       :architecture      => 'x86_64',
-      :image_id          => convert_instance_image(server),
+      :image_id          => find_instance_image(server),
       :instance_profile  => InstanceProfile::new('default'),
       :public_addresses  => server.public_ips,
       :private_addresses => server.private_ips,
@@ -458,7 +457,6 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
       :storage_volumes => convert_instance_storages_volumes(server)
     )
     inst.actions = instance_actions_for( inst.state )
-    #inst.create_image = 'RUNNING'.eql?( inst.state )
     inst
   end
 
@@ -488,13 +486,12 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
     end
   end
 
-
   def convert_instance_storages_volumes(server)
     return [] if server.connected_storages.nil?
     server.connected_storages.collect { |s| {s.id => nil} }
   end
 
-  def convert_instance_image(server)
+  def find_instance_image(server)
     return nil if server.connected_storages.nil?
     server.connected_storages.each do |s|
       # FIXME due to the api not returning the bootDevice flag we just use the first image we find
@@ -504,11 +501,10 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
     return nil
   end
 
-
   def convert_storage (storage)
     result = StorageVolume.new(
         :id => storage.id,
-        :name => storage.name,
+        :name => storage.respond_to?(:name) ? storage.name : 'unknown',
         :description => "Capacity: #{storage.size}GB",
         :state => convert_storage_state(storage),
         :capacity => storage.size,
@@ -572,14 +568,7 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
       :network => nic.lan_id,
       :ip_address => nic.ips.first
     })
-=begin
-    if nic.respond_to?("ips")
-      net.ip_address = nic.ips.first
-    end
-=end
-    pp net
   end
-
 
   def convert_firewall(firewall)
     Firewall.new({
@@ -630,23 +619,18 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
   end
 
   exceptions do
-
     on /No offering found/ do
       status 400
     end
 
-    on /Authentication failed/ do
+    on /Failed to authenticate/ do
       status 401
     end
 
     on /Error/ do
       status 500
     end
-
   end
-
-  private
-
 end
 
     end

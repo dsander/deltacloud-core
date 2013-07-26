@@ -23,6 +23,7 @@ gem 'openstack', '>=1.0.9'
 gem 'savon'
 gem 'rbvmomi'
 gem 'rbovirt', '>=0.0.19'
+gem "profitbricks", :path => '/home/dominik/code/ruby/profitbricks' #:github => "dsander/profitbricks", :ref => '269702b'
 
 platform :mri do
   gem 'sqlite3'
