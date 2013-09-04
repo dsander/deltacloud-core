@@ -57,8 +57,8 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
     new_client(credentials)
     results = []
     safely do
-      datacenters = if opts[:image]!=nil
-        ::Profitbricks::DataCenter.all.select { |img| opts[:image].description =~ /Region: #{img.region},/ }
+      datacenters = if opts[:image] != nil
+        ::Profitbricks::DataCenter.all.select { |dc| opts[:image].description.include? dc.region }
       else
         ::Profitbricks::DataCenter.all
       end
@@ -623,10 +623,6 @@ class ProfitbricksDriver < Deltacloud::BaseDriver
   end
 
   exceptions do
-    on /No offering found/ do
-      status 400
-    end
-
     on /Failed to authenticate/ do
       status 401
     end
